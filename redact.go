@@ -90,9 +90,13 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	for i, a := range attrs {
 		redacted[i] = h.redactAttr(a)
 	}
+	newAttrs := make([]slog.Attr, len(h.attrs)+len(redacted))
+	copy(newAttrs, h.attrs)
+	copy(newAttrs[len(h.attrs):], redacted)
 	return &Handler{
 		inner:         h.inner.WithAttrs(redacted),
 		sensitiveKeys: h.sensitiveKeys,
+		attrs:         newAttrs,
 		groups:        h.groups,
 	}
 }
@@ -107,6 +111,9 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 }
 
 func (h *Handler) redactAttr(a slog.Attr) slog.Attr {
+	// Resolve LogValuer types before checking
+	a.Value = a.Value.Resolve()
+
 	// Handle groups recursively
 	if a.Value.Kind() == slog.KindGroup {
 		attrs := a.Value.Group()
