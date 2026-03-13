@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const redactedValue = "[REDACTED]"
+const defaultRedactedValue = "[REDACTED]"
 
 // DefaultSensitiveKeys are field names that are redacted by default.
 var DefaultSensitiveKeys = []string{
@@ -20,6 +20,7 @@ var DefaultSensitiveKeys = []string{
 type Handler struct {
 	inner         slog.Handler
 	sensitiveKeys map[string]struct{}
+	redactedValue string
 	attrs         []slog.Attr
 	groups        []string
 }
@@ -47,11 +48,20 @@ func WithAdditionalKeys(keys ...string) Option {
 	}
 }
 
+// WithRedactedValue sets the string used to replace sensitive values.
+// Defaults to "[REDACTED]".
+func WithRedactedValue(s string) Option {
+	return func(h *Handler) {
+		h.redactedValue = s
+	}
+}
+
 // New creates a new redacting Handler wrapping the given inner handler.
 func New(inner slog.Handler, opts ...Option) *Handler {
 	h := &Handler{
 		inner:         inner,
 		sensitiveKeys: make(map[string]struct{}, len(DefaultSensitiveKeys)),
+		redactedValue: defaultRedactedValue,
 	}
 	for _, k := range DefaultSensitiveKeys {
 		h.sensitiveKeys[strings.ToLower(k)] = struct{}{}
@@ -96,6 +106,7 @@ func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &Handler{
 		inner:         h.inner.WithAttrs(redacted),
 		sensitiveKeys: h.sensitiveKeys,
+		redactedValue: h.redactedValue,
 		attrs:         newAttrs,
 		groups:        h.groups,
 	}
@@ -106,6 +117,7 @@ func (h *Handler) WithGroup(name string) slog.Handler {
 	return &Handler{
 		inner:         h.inner.WithGroup(name),
 		sensitiveKeys: h.sensitiveKeys,
+		redactedValue: h.redactedValue,
 		groups:        append(append([]string{}, h.groups...), name),
 	}
 }
@@ -125,7 +137,7 @@ func (h *Handler) redactAttr(a slog.Attr) slog.Attr {
 	}
 
 	if h.isSensitive(a.Key) {
-		return slog.String(a.Key, redactedValue)
+		return slog.String(a.Key, h.redactedValue)
 	}
 	return a
 }

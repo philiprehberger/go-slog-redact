@@ -201,6 +201,65 @@ func (s sensitiveData) LogValue() slog.Value {
 	return slog.StringValue(s.secret)
 }
 
+func TestWithRedactedValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf, WithRedactedValue("***"))
+	logger.Info("test", "password", "secret123", "username", "alice")
+
+	m := parseJSON(t, &buf)
+	if m["password"] != "***" {
+		t.Errorf("expected password='***', got %v", m["password"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("expected username=alice, got %v", m["username"])
+	}
+}
+
+func TestWithRedactedValueInGroup(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf, WithRedactedValue("<hidden>"))
+	logger.Info("test", slog.Group("auth",
+		slog.String("token", "abc123"),
+		slog.String("user", "bob"),
+	))
+
+	m := parseJSON(t, &buf)
+	group, ok := m["auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected auth group, got %v", m["auth"])
+	}
+	if group["token"] != "<hidden>" {
+		t.Errorf("expected token='<hidden>' in group, got %v", group["token"])
+	}
+	if group["user"] != "bob" {
+		t.Errorf("expected user=bob, got %v", group["user"])
+	}
+}
+
+func TestDeepNestedGroupRedaction(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf)
+	logger.Info("test", slog.Group("level1",
+		slog.Group("level2",
+			slog.Group("level3",
+				slog.String("password", "deep-secret"),
+				slog.String("name", "test"),
+			),
+		),
+	))
+
+	m := parseJSON(t, &buf)
+	l1, _ := m["level1"].(map[string]any)
+	l2, _ := l1["level2"].(map[string]any)
+	l3, _ := l2["level3"].(map[string]any)
+	if l3["password"] != "[REDACTED]" {
+		t.Errorf("expected deeply nested password redacted, got %v", l3["password"])
+	}
+	if l3["name"] != "test" {
+		t.Errorf("expected name=test, got %v", l3["name"])
+	}
+}
+
 func TestLogValuerResolved(t *testing.T) {
 	var buf bytes.Buffer
 	logger := newTestLogger(&buf)

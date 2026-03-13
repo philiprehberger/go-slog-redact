@@ -40,6 +40,15 @@ handler := slogredact.New(inner,
 )
 ```
 
+### Custom Redaction String
+
+```go
+handler := slogredact.New(inner,
+    slogredact.WithRedactedValue("***"),
+)
+// Sensitive fields will show "***" instead of "[REDACTED]"
+```
+
 ### Add to Default List
 
 ```go

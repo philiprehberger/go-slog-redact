@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Add `WithRedactedValue()` option to customize the replacement string (default: `[REDACTED]`)
+- Add deep nested group redaction test
+
 ## 0.2.0
 
 - Fix `WithAttrs` not preserving pre-added attributes for redaction
