@@ -4,7 +4,7 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-slog-redact.svg)](https://pkg.go.dev/github.com/philiprehberger/go-slog-redact)
 [![License](https://img.shields.io/github/license/philiprehberger/go-slog-redact)](LICENSE)
 
-Sensitive field redaction middleware for Go's `log/slog`.
+Sensitive field redaction middleware for Go's `log/slog`
 
 ## Installation
 
@@ -70,6 +70,22 @@ logger.WithGroup("request").Info("incoming",
 )
 // authorization is still redacted inside groups
 ```
+
+## API
+
+| Function / Method | Description |
+|---|---|
+| `Handler` | slog.Handler middleware that redacts sensitive fields |
+| `Option` | Functional option for configuring the handler |
+| `New(inner slog.Handler, opts ...Option) *Handler` | Create a new redacting handler |
+| `WithSensitiveKeys(keys ...string) Option` | Replace the default sensitive keys list |
+| `WithAdditionalKeys(keys ...string) Option` | Add keys to the default sensitive list |
+| `WithRedactedValue(s string) Option` | Set custom replacement string (default "[REDACTED]") |
+| `(*Handler) Enabled(ctx, level) bool` | Report whether the inner handler handles this level |
+| `(*Handler) Handle(ctx, record) error` | Redact sensitive fields and delegate to inner handler |
+| `(*Handler) WithAttrs(attrs []slog.Attr) slog.Handler` | Return handler with pre-added redacted attributes |
+| `(*Handler) WithGroup(name string) slog.Handler` | Return handler scoped to a group |
+| `DefaultSensitiveKeys` | Default list of field names redacted automatically |
 
 ## Development
 
