@@ -1,8 +1,6 @@
 # go-slog-redact
 
-[![CI](https://github.com/philiprehberger/go-slog-redact/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-slog-redact/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-slog-redact.svg)](https://pkg.go.dev/github.com/philiprehberger/go-slog-redact)
-[![License](https://img.shields.io/github/license/philiprehberger/go-slog-redact)](LICENSE)
+[![CI](https://github.com/philiprehberger/go-slog-redact/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-slog-redact/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-slog-redact.svg)](https://pkg.go.dev/github.com/philiprehberger/go-slog-redact) [![License](https://img.shields.io/github/license/philiprehberger/go-slog-redact)](LICENSE)
 
 Sensitive field redaction middleware for Go's `log/slog`
 
