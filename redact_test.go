@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -268,5 +269,351 @@ func TestLogValuerResolved(t *testing.T) {
 	m := parseJSON(t, &buf)
 	if m["token"] != "[REDACTED]" {
 		t.Errorf("expected token with LogValuer to be redacted, got %v", m["token"])
+	}
+}
+
+// --- Pattern matching tests ---
+
+func TestWithPatterns(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithSensitiveKeys(), // clear defaults
+		WithPatterns(`^x-.*-key$`, `_secret$`),
+	)
+	logger.Info("test",
+		"x-api-key", "key123",
+		"x-auth-key", "auth456",
+		"db_secret", "dbpass",
+		"username", "alice",
+	)
+
+	m := parseJSON(t, &buf)
+	if m["x-api-key"] != "[REDACTED]" {
+		t.Errorf("expected x-api-key redacted, got %v", m["x-api-key"])
+	}
+	if m["x-auth-key"] != "[REDACTED]" {
+		t.Errorf("expected x-auth-key redacted, got %v", m["x-auth-key"])
+	}
+	if m["db_secret"] != "[REDACTED]" {
+		t.Errorf("expected db_secret redacted, got %v", m["db_secret"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("expected username=alice, got %v", m["username"])
+	}
+}
+
+func TestWithPatternsAndDefaults(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf, WithPatterns(`_id$`))
+	logger.Info("test",
+		"user_id", "12345",
+		"password", "secret",
+		"name", "alice",
+	)
+
+	m := parseJSON(t, &buf)
+	if m["user_id"] != "[REDACTED]" {
+		t.Errorf("expected user_id redacted by pattern, got %v", m["user_id"])
+	}
+	if m["password"] != "[REDACTED]" {
+		t.Errorf("expected password redacted by default keys, got %v", m["password"])
+	}
+	if m["name"] != "alice" {
+		t.Errorf("expected name=alice, got %v", m["name"])
+	}
+}
+
+func TestWithPatternsInvalidRegex(t *testing.T) {
+	// Invalid patterns should be silently skipped
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithSensitiveKeys(),
+		WithPatterns(`[invalid`, `_key$`),
+	)
+	logger.Info("test", "api_key", "val1", "name", "alice")
+
+	m := parseJSON(t, &buf)
+	if m["api_key"] != "[REDACTED]" {
+		t.Errorf("expected api_key redacted by valid pattern, got %v", m["api_key"])
+	}
+	if m["name"] != "alice" {
+		t.Errorf("expected name=alice, got %v", m["name"])
+	}
+}
+
+// --- Custom mask function tests ---
+
+func TestWithMask(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf, WithMask(func(s string) string {
+		return "MASKED:" + s
+	}))
+	logger.Info("test", "password", "secret123", "username", "alice")
+
+	m := parseJSON(t, &buf)
+	if m["password"] != "MASKED:secret123" {
+		t.Errorf("expected password='MASKED:secret123', got %v", m["password"])
+	}
+	if m["username"] != "alice" {
+		t.Errorf("expected username=alice, got %v", m["username"])
+	}
+}
+
+func TestWithMaskOverridesRedactedValue(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithRedactedValue("***"),
+		WithMask(func(s string) string {
+			return "custom"
+		}),
+	)
+	logger.Info("test", "password", "secret")
+
+	m := parseJSON(t, &buf)
+	// mask function should take precedence over redacted value
+	if m["password"] != "custom" {
+		t.Errorf("expected password='custom', got %v", m["password"])
+	}
+}
+
+func TestWithMaskInGroup(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf, WithMask(PartialMask(4)))
+	logger.Info("test", slog.Group("auth",
+		slog.String("token", "abcdefghij"),
+		slog.String("user", "bob"),
+	))
+
+	m := parseJSON(t, &buf)
+	group, ok := m["auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected auth group, got %v", m["auth"])
+	}
+	if group["token"] != "******ghij" {
+		t.Errorf("expected token='******ghij', got %v", group["token"])
+	}
+	if group["user"] != "bob" {
+		t.Errorf("expected user=bob, got %v", group["user"])
+	}
+}
+
+// --- Value-based redaction tests ---
+
+func TestWithValueRedaction(t *testing.T) {
+	// Redact any value that looks like a credit card (simple check: 16 digits)
+	isCreditCard := func(key string, val slog.Value) bool {
+		s := val.String()
+		if len(s) != 16 {
+			return false
+		}
+		for _, c := range s {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+		return true
+	}
+
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithSensitiveKeys(), // clear defaults
+		WithValueRedaction(isCreditCard),
+	)
+	logger.Info("test",
+		"card_number", "1234567890123456",
+		"name", "alice",
+		"short", "1234",
+	)
+
+	m := parseJSON(t, &buf)
+	if m["card_number"] != "[REDACTED]" {
+		t.Errorf("expected card_number redacted, got %v", m["card_number"])
+	}
+	if m["name"] != "alice" {
+		t.Errorf("expected name=alice, got %v", m["name"])
+	}
+	if m["short"] != "1234" {
+		t.Errorf("expected short=1234, got %v", m["short"])
+	}
+}
+
+func TestWithValueRedactionAndMask(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithSensitiveKeys(),
+		WithValueRedaction(func(key string, val slog.Value) bool {
+			return len(val.String()) > 10
+		}),
+		WithMask(PartialMask(4)),
+	)
+	logger.Info("test",
+		"data", "abcdefghijklmnop",
+		"short", "abc",
+	)
+
+	m := parseJSON(t, &buf)
+	if m["data"] != "************mnop" {
+		t.Errorf("expected data='************mnop', got %v", m["data"])
+	}
+	if m["short"] != "abc" {
+		t.Errorf("expected short=abc, got %v", m["short"])
+	}
+}
+
+func TestWithValueRedactionKeySpecific(t *testing.T) {
+	var buf bytes.Buffer
+	logger := newTestLogger(&buf,
+		WithSensitiveKeys(),
+		WithValueRedaction(func(key string, val slog.Value) bool {
+			return key == "email" && strings.Contains(val.String(), "@")
+		}),
+	)
+	logger.Info("test",
+		"email", "alice@example.com",
+		"note", "contact alice@example.com",
+	)
+
+	m := parseJSON(t, &buf)
+	if m["email"] != "[REDACTED]" {
+		t.Errorf("expected email redacted, got %v", m["email"])
+	}
+	// note should NOT be redacted since key != "email"
+	if m["note"] != "contact alice@example.com" {
+		t.Errorf("expected note unchanged, got %v", m["note"])
+	}
+}
+
+// --- PartialMask tests ---
+
+func TestPartialMask(t *testing.T) {
+	mask := PartialMask(4)
+
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"1234567890", "******7890"},
+		{"abcd", "abcd"},       // exactly showLast chars
+		{"abc", "abc"},         // fewer than showLast chars
+		{"12345", "*2345"},     // one more than showLast
+		{"a", "a"},             // single char
+		{"", ""},               // empty string
+	}
+
+	for _, tc := range tests {
+		got := mask(tc.input)
+		if got != tc.expected {
+			t.Errorf("PartialMask(4)(%q) = %q, want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestPartialMaskZero(t *testing.T) {
+	mask := PartialMask(0)
+	got := mask("secret")
+	if got != "******" {
+		t.Errorf("PartialMask(0)(\"secret\") = %q, want %q", got, "******")
+	}
+}
+
+func TestPartialMaskNegative(t *testing.T) {
+	mask := PartialMask(-1)
+	got := mask("secret")
+	if got != "******" {
+		t.Errorf("PartialMask(-1)(\"secret\") = %q, want %q", got, "******")
+	}
+}
+
+// --- Stats tests ---
+
+func TestStatsInitiallyZero(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner)
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 0 {
+		t.Errorf("expected initial RedactedCount=0, got %d", stats.RedactedCount)
+	}
+}
+
+func TestStatsCountsRedactions(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner)
+	logger := slog.New(handler)
+
+	logger.Info("test", "password", "secret", "token", "tok123", "name", "alice")
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 2 {
+		t.Errorf("expected RedactedCount=2, got %d", stats.RedactedCount)
+	}
+}
+
+func TestStatsAccumulatesAcrossLogs(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner)
+	logger := slog.New(handler)
+
+	logger.Info("first", "password", "pass1")
+	buf.Reset()
+	logger.Info("second", "token", "tok1", "secret", "sec1")
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 3 {
+		t.Errorf("expected RedactedCount=3, got %d", stats.RedactedCount)
+	}
+}
+
+func TestStatsSharedAcrossWithGroup(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner)
+	grouped := handler.WithGroup("req")
+	logger := slog.New(grouped)
+
+	logger.Info("test", "password", "secret")
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 1 {
+		t.Errorf("expected RedactedCount=1 shared via WithGroup, got %d", stats.RedactedCount)
+	}
+}
+
+func TestStatsCountsPatternRedactions(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner,
+		WithSensitiveKeys(),
+		WithPatterns(`_key$`),
+	)
+	logger := slog.New(handler)
+
+	logger.Info("test", "api_key", "val1", "auth_key", "val2", "name", "alice")
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 2 {
+		t.Errorf("expected RedactedCount=2 for pattern redactions, got %d", stats.RedactedCount)
+	}
+}
+
+func TestStatsCountsValueRedactions(t *testing.T) {
+	var buf bytes.Buffer
+	inner := slog.NewJSONHandler(&buf, nil)
+	handler := New(inner,
+		WithSensitiveKeys(),
+		WithValueRedaction(func(key string, val slog.Value) bool {
+			return val.String() == "sensitive"
+		}),
+	)
+	logger := slog.New(handler)
+
+	logger.Info("test", "a", "sensitive", "b", "safe", "c", "sensitive")
+
+	stats := handler.Stats()
+	if stats.RedactedCount != 2 {
+		t.Errorf("expected RedactedCount=2 for value redactions, got %d", stats.RedactedCount)
 	}
 }

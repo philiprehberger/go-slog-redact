@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Add `WithPatterns()` option to redact keys matching regex patterns
+- Add `WithMask()` option for custom masking functions instead of fixed redaction string
+- Add `WithValueRedaction()` option to redact based on value content
+- Add `PartialMask()` helper that returns a masking function showing only the last N characters
+- Add `Stats()` method and `RedactStats` type for tracking redaction counts atomically
+
 ## 0.3.2
 
 - Consolidate README badges onto single line
