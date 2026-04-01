@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Standardize README to 3-badge format with emoji Support section
+- Update CI checkout action to v5 for Node.js 24 compatibility
+- Add GitHub issue templates, dependabot config, and PR template
+
 ## 0.4.0
 
 - Add `WithPatterns()` option to redact keys matching regex patterns
